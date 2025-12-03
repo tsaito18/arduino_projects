@@ -1,0 +1,139 @@
+#include <Arduino.h>
+
+// IO ピン
+const int PIN_PWMA = 5;   // モータAの回転速度を決めるPWM信号を送るピン(左)
+const int PIN_PWMB = 6;   // モータBの回転速度を決めるPWM信号を送るピン(右)
+const int PIN_AIN1 = 9;   // モータAの回転方向を決める信号を送るピンその1
+const int PIN_AIN2 = 8;   // モータAの回転方向を決める信号を送るピンその2
+const int PIN_BIN1 = 10;  // モータBの回転方向を決める信号を送るピンその1
+const int PIN_BIN2 = 11;  // モータBの回転方向を決める信号を送るピンその2
+
+// センサ
+const int PIN_SENSOR_LEFT = A5;
+const int PIN_SENSOR_RIGHT = A4;
+
+// 制御用の定数
+const int BASE_SPEED = 85;
+const int MAX_SPEED = 110;
+const int SENSOR_THRESHOLD = 70;
+
+// 比例ゲイン
+const float Kp = 0.625;
+
+void setup() {
+  // シリアル通信を開始（デバッグ用・通信速度を 115200bps に設定）
+  Serial.begin(115200);
+
+  // IOピンの入出力モード設定
+  pinMode(PIN_PWMA, OUTPUT);
+  pinMode(PIN_PWMB, OUTPUT);
+  pinMode(PIN_AIN1, OUTPUT);
+  pinMode(PIN_AIN2, OUTPUT);
+  pinMode(PIN_BIN1, OUTPUT);
+  pinMode(PIN_BIN2, OUTPUT);
+  pinMode(PIN_SENSOR_LEFT, INPUT);
+  pinMode(PIN_SENSOR_RIGHT, INPUT);
+
+  // 起動してすぐに暴走しないように初期状態をモータA/モータBいずれも停止で確定させる（これを初期化という）
+  digitalWrite(PIN_AIN1, LOW);
+  digitalWrite(PIN_AIN2, LOW);
+  digitalWrite(PIN_BIN1, LOW);
+  digitalWrite(PIN_BIN2, LOW);
+
+  // モータの回転速度を設定しておく。ここで必ずしなければならないわけではない
+  analogWrite(PIN_PWMA, 0);
+  analogWrite(PIN_PWMB, 0);
+
+  // すぐに動き出さないように 1 秒待つ
+  delay(1000);
+}
+
+/**
+ * @brief モータを回転させる
+ *
+ * @param motor モータの番号（0: モータ A（左）, 1: モータ B（右））
+ * @param direction 回転方向（0: 正転, 1: 後転）
+ * @param speed 回転速度（0~255）
+ */
+void rotateMotor(int motor, int direction, int speed) {
+  // 速度を0-255の範囲に制限
+  speed = constrain(speed, 0, 255);
+
+  if (motor == 0) {        // モータA (左)
+    if (direction == 0) {  // 正転
+      digitalWrite(PIN_AIN1, HIGH);
+      digitalWrite(PIN_AIN2, LOW);
+    } else {  // 後転
+      digitalWrite(PIN_AIN1, LOW);
+      digitalWrite(PIN_AIN2, HIGH);
+    }
+    analogWrite(PIN_PWMA, speed);  // モータAの回転速度を設定
+  } else {                         // モータB (右)
+    if (direction == 0) {          // 正転
+      digitalWrite(PIN_BIN1, HIGH);
+      digitalWrite(PIN_BIN2, LOW);
+    } else {  // 後転
+      digitalWrite(PIN_BIN1, LOW);
+      digitalWrite(PIN_BIN2, HIGH);
+    }
+    analogWrite(PIN_PWMB, speed);  // モータBの回転速度を設定
+  }
+}
+
+void loop() {
+  // センサからの電圧を 0~1023 の 1024 段階で読み取る
+  // 数字が大きければ大きいほど、センサが白を検知していることを示す
+  // ↑ 実測で白が 200、黒が 0 付近
+  int sensLeft = analogRead(PIN_SENSOR_LEFT);
+  int sensRight = analogRead(PIN_SENSOR_RIGHT);
+
+  // デバッグ用
+  Serial.print("Left: ");
+  Serial.print(sensLeft);
+  Serial.print(", Right: ");
+  Serial.print(sensRight);
+
+  // P 制御の計算
+  // 線が中央にあるとき、sensLeft と sensRight は近い値になる
+  // (理想は白い線の上で両方高い値)。 右にずれた場合 (車体が右、白い線が左):
+  // 左センサーが白(高)、右センサーが黒(低) -> error は正・左に曲がる
+  // 左にずれた場合 (車体が左、白い線が右):
+  // 左センサーが黒(低)、右センサーが白(高) -> error は負・右に曲がる
+  int error = sensLeft - sensRight;
+
+  // 制御量 (correction) の計算
+  // error が正 (右ずれ) -> 左モーター減速、右モーター加速
+  // error が負 (左ずれ) -> 左モーター加速、右モーター減速
+  int correction = Kp * error;
+
+  // モーター速度の計算
+  int motorSpeedLeft = BASE_SPEED - correction;
+  int motorSpeedRight = BASE_SPEED + correction;
+
+  // 両方が白線の場合（クロス部分）
+  if (sensLeft >= SENSOR_THRESHOLD && sensRight >= SENSOR_THRESHOLD) {
+    Serial.print(" | Both white -> Straight");
+    rotateMotor(0, 0, BASE_SPEED);  // モータ A (左) を基本速度で正転
+    rotateMotor(1, 0, BASE_SPEED);  // モータ B (右) を基本速度で正転
+  } else {
+    // P 制御によるライントレース
+    Serial.print(" | P-Control -> Error: ");
+    Serial.print(error);
+    Serial.print(", Correction: ");
+    Serial.print(correction);
+
+    // 速度を 0-MAX_SPEED の範囲に制限
+    motorSpeedLeft = constrain(motorSpeedLeft, 0, MAX_SPEED);
+    motorSpeedRight = constrain(motorSpeedRight, 0, MAX_SPEED);
+
+    rotateMotor(0, 0, motorSpeedLeft);   // モータ A (左) を計算された速度で正転
+    rotateMotor(1, 0, motorSpeedRight);  // モータ B (右) を計算された速度で正転
+  }
+
+  Serial.print(" | Speed L: ");
+  Serial.print(motorSpeedLeft);
+  Serial.print(", Speed R: ");
+  Serial.println(motorSpeedRight);
+
+  delay(10);  // 制御周期 (10ミリ秒)
+}

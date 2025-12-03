@@ -1,0 +1,2 @@
+#define SECRET_SSID "FS-2J69P"
+#define SECRET_PASS "l22fg5i27su67"
