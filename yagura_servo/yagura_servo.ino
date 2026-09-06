@@ -1,7 +1,8 @@
 #include <Servo.h>
 
 Servo myservo;
-const int SV_PIN = 7;
+const int SV_PIN = 4;
+const bool IS_270_DEGREES = true;
 
 int targetVal = 0;
 int currentVal = 0;
@@ -22,6 +23,10 @@ void loop() {
 
     // 残った改行コードなどを捨てる
     while (Serial.available() > 0) { Serial.read(); }
+
+    if (IS_270_DEGREES) {
+      targetVal = (int)(targetVal * 180.0 / 270.0);
+    }
 
     targetVal = constrain(targetVal, 0, 180);
 
