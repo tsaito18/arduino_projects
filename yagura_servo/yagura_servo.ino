@@ -4,6 +4,7 @@ Servo myservo;
 const int SV_PIN = 4;
 const bool IS_270_DEGREES = true;
 
+int rawVal = 0;
 int targetVal = 0;
 int currentVal = 0;
 int speedDelay = 20;
@@ -19,19 +20,21 @@ void setup() {
 
 void loop() {
   if (Serial.available()) {
-    targetVal = Serial.parseInt();
+    rawVal = Serial.parseInt();
 
     // 残った改行コードなどを捨てる
     while (Serial.available() > 0) { Serial.read(); }
 
     if (IS_270_DEGREES) {
-      targetVal = (int)(targetVal * 180.0 / 270.0);
+      rawVal = constrain(rawVal, 0, 270);
+      targetVal = (int)(rawVal * 180.0 / 270.0);
+    } else {
+      rawVal = constrain(rawVal, 0, 180);
+      targetVal = rawVal;
     }
 
-    targetVal = constrain(targetVal, 0, 180);
-
     Serial.print("Move to: ");
-    Serial.print(targetVal);
+    Serial.print(rawVal);
 
     if (targetVal > currentVal) {
       for (int i = currentVal; i <= targetVal; i++) {
